@@ -1,0 +1,102 @@
+name: Build Luxe APK
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Auto-fix everything
+        run: |
+          rm -rf app/src/main/app
+          rm -rf app/src/main/java/com/luxe/player/res
+          mkdir -p app/src/main/res/layout
+          mkdir -p app/src/main/java/com/luxe/player
+          cat > gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx2g -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          EOF
+          cat > settings.gradle <<'EOF'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
+          rootProject.name = "Luxe Player"
+          include ':app'
+          EOF
+          cat > build.gradle <<'EOF'
+          plugins { id 'com.android.application' version '8.2.0' apply false }
+          EOF
+          cat > app/build.gradle <<'EOF'
+          plugins { id 'com.android.application' }
+          android {
+              namespace 'com.luxe.player'
+              compileSdk 34
+              defaultConfig { applicationId "com.luxe.player"; minSdk 21; targetSdk 34; versionCode 1; versionName "1.0" }
+              buildTypes { release { minifyEnabled false } }
+              compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+          }
+          dependencies { implementation 'androidx.appcompat:appcompat:1.6.1' }
+          EOF
+          cat > app/src/main/res/layout/activity_main.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:orientation="vertical" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#0A0A0A">
+              <LinearLayout android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="12dp">
+                  <EditText android:id="@+id/input" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:hint="paste site link here" android:textColor="#FFFFFF" android:hintTextColor="#888888" android:background="#222222" android:padding="10dp"/>
+                  <Button android:id="@+id/addBtn" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Add" android:layout_marginStart="8dp"/>
+              </LinearLayout>
+              <ListView android:id="@+id/listView" android:layout_width="match_parent" android:layout_height="120dp" android:background="#111111"/>
+              <WebView android:id="@+id/webview" android:layout_width="match_parent" android:layout_height="match_parent"/>
+          </LinearLayout>
+          EOF
+          cat > app/src/main/java/com/luxe/player/MainActivity.kt <<'EOF'
+          package com.luxe.player
+          import android.os.Bundle
+          import android.webkit.WebView
+          import android.webkit.WebViewClient
+          import android.widget.ArrayAdapter
+          import android.widget.Button
+          import android.widget.EditText
+          import android.widget.ListView
+          import androidx.appcompat.app.AlertDialog
+          import androidx.appcompat.app.AppCompatActivity
+          class MainActivity : AppCompatActivity() {
+              private lateinit var webView: WebView
+              private val sites = mutableListOf<String>()
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  setContentView(R.layout.activity_main)
+                  webView = findViewById(R.id.webview)
+                  val input = findViewById<EditText>(R.id.input)
+                  val addBtn = findViewById<Button>(R.id.addBtn)
+                  val listView = findViewById<ListView>(R.id.listView)
+                  webView.settings.javaScriptEnabled = true
+                  webView.settings.domStorageEnabled = true
+                  webView.webViewClient = WebViewClient()
+                  AlertDialog.Builder(this).setTitle("18+ Only").setMessage("This app is for adults 18+. You must add your own legal adult sites.").setPositiveButton("I am 18+") { d, _ -> d.dismiss() }.setNegativeButton("Exit") { _, _ -> finish() }.setCancelable(false).show()
+                  val adapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, sites)
+                  listView.adapter = adapter
+                  addBtn.setOnClickListener {
+                      val url = input.text.toString().trim()
+                      if (url.isNotEmpty()) {
+                          val fixed = if (url.startsWith("http")) url else "https://$url"
+                          sites.add(fixed)
+                          adapter.notifyDataSetChanged()
+                          input.text.clear()
+                      }
+                  }
+                  listView.setOnItemClickListener { _, _, pos, _ -> webView.loadUrl(sites[pos]) }
+                  listView.setOnItemLongClickListener { _, _, pos, _ ->
+                      AlertDialog.Builder(this).setTitle("Remove site?").setPositiveButton("Remove") { _, _ -> sites.removeAt(pos); adapter.notifyDataSetChanged() }.setNegativeButton("Cancel", null).show()
+                      true
+                  }
+              }
+              override fun onBackPressed() { if (webView.canGoBack()) webView.goBack() else super.onBackPressed() }
+          }
+          EOF
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - uses: android-actions/setup-android@v3
+      - name: Build
+        run: |
+          chmod +x gradlew
+         ./gradlew assembleDebug
+      - uses: actions/upload-artifact@v4
+        with: { name: luxe-player-fixed, path: app/build/outputs/apk/debug/app-debug.apk }
